@@ -36,7 +36,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <span class="board-caption"><span class="live-dot"></span><span id="phase">PRONTO QUANDO VOCÊ ESTIVER</span></span>
         <span class="elapsed" aria-label="Tempo da tentativa"><span id="timer">0.000</span><small>s</small></span>
       </div>
-      <div class="view-controls"><span>Ritmo 75% · arraste para girar · pinça/roda para zoom</span><button id="rotate-left" type="button" aria-label="Girar para a esquerda" title="Girar para a esquerda">↶</button><button id="rotate-right" type="button" aria-label="Girar para a direita" title="Girar para a direita">↷</button><button id="reset-view" type="button">Restaurar vista</button></div>
+      <div class="view-controls"><span>Ritmo 50% · arraste para girar · pinça/roda para zoom</span><button id="rotate-left" type="button" aria-label="Girar para a esquerda" title="Girar para a esquerda">↶</button><button id="rotate-right" type="button" aria-label="Girar para a direita" title="Girar para a direita">↷</button><button id="reset-view" type="button">Restaurar vista</button></div>
       <div class="track-stage">
         <canvas id="game-canvas" aria-label="Seis pistas coloridas com trajetórias diferentes. Libere cada bola pelos botões ou pelas teclas 1 a 6."></canvas>
         <div id="launchers" class="launchers" role="group" aria-label="Liberar bolas"></div>
@@ -188,7 +188,7 @@ function updateDebug() {
   const longest = Math.max(...game.puzzle.tracks.map((track) => track.travelDuration));
   const debug = element('debug');
   debug.hidden = false;
-  debug.innerHTML = `<h2>Debug · Seed #${game.puzzle.seed} · ${game.state}</h2><p>Relógio de simulação a 75% de performance.now(), em ms. Atraso ideal relativo à liberação da pista mais lenta.</p><div class="table-scroll"><table><thead><tr><th>Pista</th><th>Duração</th><th>Liberação</th><th>Chegada</th><th>Atraso ideal</th></tr></thead><tbody>${game.puzzle.tracks.map((track, index) => {
+  debug.innerHTML = `<h2>Debug · Seed #${game.puzzle.seed} · ${game.state}</h2><p>Relógio de simulação a 50% de performance.now(), em ms. Atraso ideal relativo à liberação da pista mais lenta.</p><div class="table-scroll"><table><thead><tr><th>Pista</th><th>Duração</th><th>Liberação</th><th>Chegada</th><th>Atraso ideal</th></tr></thead><tbody>${game.puzzle.tracks.map((track, index) => {
     const ball = game.balls[index];
     return `<tr><th>${track.id + 1} · ${track.name}</th><td>${track.travelDuration.toFixed(2)}</td><td>${ball.releasedAt?.toFixed(2) ?? '—'}</td><td>${ball.arrivedAt?.toFixed(2) ?? '—'}</td><td>${(longest - track.travelDuration).toFixed(2)}</td></tr>`;
   }).join('')}</tbody></table></div>`;

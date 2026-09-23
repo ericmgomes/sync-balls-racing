@@ -5,7 +5,7 @@ export const WORLD = { width: 820, height: 850, startY: 66, finishY: 774, margin
 export const BARRIER = { topY: WORLD.finishY - 46, bottomY: WORLD.finishY, clearance: 20 } as const;
 
 // Slow the shared simulation clock, preserving gravity and acceleration profiles.
-export const PLAYBACK_RATE = 0.75;
+export const PLAYBACK_RATE = 0.5;
 export const simulationTime = (realTime: number) => realTime * PLAYBACK_RATE;
 
 export const PHYSICS = {
