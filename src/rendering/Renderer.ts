@@ -2,7 +2,7 @@ import { BARRIER, WORLD } from '../game/config';
 import type { Game } from '../game/Game';
 import { pointAtProgress } from '../game/Track';
 import type { Point, Puzzle, Track } from '../game/types';
-import { BALL_LIFT, projectPoint } from './projection';
+import { projectPoint } from './projection';
 import { rollingOrientation, rotateSurface, type Vector } from './rolling';
 // Fine brushed-metal marks move with the sphere; lighting stays fixed in the scene.
 const surfaceMarks: Vector[] = Array.from({ length: 42 }, (_, i) => {
@@ -15,6 +15,10 @@ function shade(hex: string, factor: number): string {
     const n = parseInt(hex.slice(1), 16);
     return `rgb(${[n >> 16, (n >> 8) & 255, n & 255].map(c => Math.round(Math.min(255, c * factor))).join(',')})`;
 }
+interface ChannelSection {
+    floor: Point;
+    sides: { foot: Point; inner: Point; outer: Point; near: boolean }[];
+}
 export class Renderer {
     private context: CanvasRenderingContext2D;
     private background = document.createElement('canvas');
@@ -22,6 +26,65 @@ export class Renderer {
     private width = 1;
     private height = 1;
     private pixelRatio = 1;
+    private channels = new Map<Track, ChannelSection[]>();
+    private railWidth() { return Math.max(20, Math.min(40, this.width / this.puzzle.tracks.length * .25)); }
+    private channelGeometry(track: Track): ChannelSection[] {
+        const points = track.path.map(point => this.position(point));
+        const rail = this.railWidth();
+        return points.map((floor, i) => {
+            const before = points[Math.max(0, i - 2)];
+            const after = points[Math.min(points.length - 1, i + 2)];
+            const length = Math.hypot(after.x-before.x, after.y-before.y) || 1;
+            const nx = -(after.y-before.y)/length;
+            const ny = (after.x-before.x)/length;
+            return { floor, sides: [-1, 1].map(side => ({
+                foot: { x: floor.x+nx*side*rail*.27, y: floor.y+ny*side*rail*.27 },
+                inner: { x: floor.x+nx*side*rail*.40, y: floor.y+ny*side*rail*.40-rail*.46 },
+                outer: { x: floor.x+nx*side*rail*.51, y: floor.y+ny*side*rail*.51-rail*.46 },
+                near: ny*side >= 0,
+            })) };
+        });
+    }
+    private channelWalls(c: CanvasRenderingContext2D, track: Track, foreground = false, progress = 0) {
+        const sections = this.channels.get(track)!;
+        const distance = progress*track.length;
+        // Redraw only walls alongside this ball, so a different height at a crossing
+        // cannot paint over it merely because the paths overlap on screen.
+        const reach = this.railWidth()*WORLD.width/this.width*2;
+        c.lineJoin = 'round';
+        for (let i=1; i<sections.length; i++) {
+            if (foreground && (track.cumulativeLengths[i]<distance-reach || track.cumulativeLengths[i-1]>distance+reach)) continue;
+            for (let side=0; side<2; side++) {
+                const a = sections[i-1].sides[side];
+                const b = sections[i].sides[side];
+                if (foreground && !(a.near && b.near)) continue;
+                const gradient = c.createLinearGradient(a.inner.x,a.inner.y,a.foot.x,a.foot.y+.1);
+                gradient.addColorStop(0,shade(track.color,a.near ? .83 : .62));
+                gradient.addColorStop(1,shade(track.color,.32));
+                c.beginPath();
+                c.moveTo(a.foot.x,a.foot.y); c.lineTo(b.foot.x,b.foot.y);
+                c.lineTo(b.inner.x,b.inner.y); c.lineTo(a.inner.x,a.inner.y);
+                c.closePath(); c.fillStyle=gradient; c.fill();
+                c.strokeStyle=gradient; c.lineWidth=.7; c.stroke();
+                this.polygon(c,[a.inner,b.inner,b.outer,a.outer],shade(track.color,a.near ? 1.15 : 1.38));
+                c.strokeStyle=shade(track.color,a.near ? 1.15 : 1.38); c.lineWidth=.7; c.stroke();
+            }
+        }
+        for (let side=0;side<2;side++) {
+            c.beginPath();
+            let connected=false;
+            for (let i=0;i<sections.length;i++) {
+                const edge=sections[i].sides[side];
+                if (foreground && (!edge.near || Math.abs(track.cumulativeLengths[i]-distance)>reach)) {
+                    connected=false; continue;
+                }
+                if (connected) c.lineTo(edge.inner.x,edge.inner.y);
+                else c.moveTo(edge.inner.x,edge.inner.y);
+                connected=true;
+            }
+            c.strokeStyle=shade(track.color,1.55); c.lineWidth=Math.max(.65,this.railWidth()*.035); c.stroke();
+        }
+    }
     constructor(private canvas: HTMLCanvasElement, private puzzle: Puzzle) {
         const context = canvas.getContext('2d');
         if (!context)
@@ -70,7 +133,9 @@ export class Renderer {
         c.clearRect(0, 0, this.width, this.height);
         const small = this.width < 600;
         const thick = small ? 7 : 15;
-        const rail = Math.max(13, Math.min(33, this.width / this.puzzle.tracks.length * 0.23));
+        const rail = this.railWidth();
+        this.channels.clear();
+        for (const track of this.puzzle.tracks) this.channels.set(track,this.channelGeometry(track));
         const corners = [{ x: 85, y: 20 }, { x: 915, y: 20 }, { x: 915, y: 565 }, { x: 85, y: 565 }].map(p => {
             const q = this.position(p);
             return { x: q.x, y: q.y + thick };
@@ -124,28 +189,26 @@ export class Renderer {
             c.lineWidth = rail + 5;
             c.stroke();
             c.restore();
-            for (let y = thick; y >= 0; y -= 2) {
+            c.lineCap='butt';
+            for (let y = thick; y >= -rail*.46; y -= 2) {
                 this.trace(c, track, y);
-                c.strokeStyle = shade(color, 0.6 + 0.4 * (1 - y / thick));
-                c.lineWidth = rail + 4;
+                c.strokeStyle = shade(color, 0.42 + 0.24 * (1 - Math.max(0,y) / thick));
+                c.lineWidth = rail;
                 c.stroke();
             }
-            this.trace(c, track, -1);
-            c.strokeStyle = shade(color, 1.28);
-            c.lineWidth = rail + 1;
+            this.trace(c, track);
+            c.strokeStyle = shade(color, 0.32);
+            c.lineWidth = rail * 0.77;
             c.stroke();
             this.trace(c, track);
-            c.strokeStyle = shade(color, 0.56);
-            c.lineWidth = rail * 0.65;
+            c.strokeStyle = shade(color,.65);
+            c.lineWidth = rail * 0.52;
             c.stroke();
-            this.trace(c, track, 2);
-            c.strokeStyle = color;
-            c.lineWidth = rail * 0.47;
+            this.trace(c, track, 1);
+            c.strokeStyle = shade(color,.86);
+            c.lineWidth = rail * 0.28;
             c.stroke();
-            this.trace(c, track, 3);
-            c.strokeStyle = shade(color, 1.13);
-            c.lineWidth = rail * 0.21;
-            c.stroke();
+            this.channelWalls(c,track);
             const start = this.position(track.path[0]);
             c.beginPath();
             c.ellipse(start.x, start.y + 4, rail * .77, rail * .5, 0, 0, Math.PI * 2);
@@ -153,7 +216,7 @@ export class Renderer {
             c.fill();
             c.beginPath();
             c.ellipse(start.x, start.y, rail * .77, rail * .5, 0, 0, Math.PI * 2);
-            c.fillStyle = color;
+            c.fillStyle = shade(color,.38);
             c.fill();
             c.strokeStyle = shade(color, 1.4);
             c.lineWidth = 2;
@@ -242,15 +305,16 @@ export class Renderer {
         c.drawImage(this.background, 0, 0);
         c.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
         const small = this.width < 600;
-        const r = small ? 9 : 14;
+        const r = this.railWidth()*.31;
         this.barrier(game);
         for (const ball of [...game.balls].sort((a, b) => pointAtProgress(this.puzzle.tracks[a.trackId], a.progress).y - pointAtProgress(this.puzzle.tracks[b.trackId], b.progress).y)) {
             const track = this.puzzle.tracks[ball.trackId];
-            const p = this.position(pointAtProgress(track, ball.progress), BALL_LIFT);
+            const floor = this.position(pointAtProgress(track, ball.progress));
+            const p = {x:floor.x,y:floor.y-r*.64};
             c.save();
             c.beginPath();
-            c.ellipse(p.x + 3, p.y + r * .85, r * 1.05, r * .43, 0, 0, Math.PI * 2);
-            c.fillStyle = '#0d172477';
+            c.ellipse(floor.x+1, floor.y+1, r*.95, r*.32, 0, 0, Math.PI*2);
+            c.fillStyle = '#081018bb';
             c.shadowColor = '#00000055';
             c.shadowBlur = 5;
             c.fill();
@@ -286,6 +350,12 @@ export class Renderer {
             c.strokeStyle = '#c9d6de';
             c.lineWidth = 2;
             c.stroke();
+            if (ball.progress>0 && ball.progress<1) {
+                c.save();
+                c.beginPath(); c.arc(p.x,p.y,r+1,0,Math.PI*2); c.clip();
+                this.channelWalls(c,track,true,ball.progress);
+                c.restore();
+            }
             c.textAlign = 'center';
             c.textBaseline = 'alphabetic';
             if (game.result) {
