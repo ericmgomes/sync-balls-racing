@@ -4,7 +4,6 @@ import { getRating, PHYSICS } from './game/config';
 import { createSeed, generatePuzzle, parseSeed } from './generation/generatePuzzle';
 import { InputManager } from './input/InputManager';
 import { Renderer } from './rendering/Renderer';
-import { BALL_LIFT, projectPoint } from './rendering/projection';
 import { saveResult, startAttempt } from './storage/scores';
 
 const icons = {
@@ -37,6 +36,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <span class="board-caption"><span class="live-dot"></span><span id="phase">PRONTO QUANDO VOCÊ ESTIVER</span></span>
         <span class="elapsed" aria-label="Tempo da tentativa"><span id="timer">0.000</span><small>s</small></span>
       </div>
+      <div class="view-controls"><span>Arraste o tabuleiro para girar</span><button id="reset-view" type="button">Restaurar vista</button></div>
       <div class="track-stage">
         <canvas id="game-canvas" aria-label="Seis pistas coloridas com trajetórias diferentes. Libere cada bola pelos botões ou pelas teclas 1 a 6."></canvas>
         <div id="launchers" class="launchers" role="group" aria-label="Liberar bolas"></div>
@@ -115,7 +115,7 @@ function makeLaunchers() {
   buttons.length = 0;
   for (const track of game.puzzle.tracks) {
     const button = document.createElement('button');
-    const start = projectPoint(track.path[0], BALL_LIFT);
+    const start = renderer.projectPoint(track.path[0]);
     button.className = 'launch-button';
     button.style.left = `${start.x * 100}%`;
     button.style.top = `${start.y * 100}%`;
@@ -248,6 +248,7 @@ async function sharePuzzle() {
 }
 
 element('retry').addEventListener('click', retry);
+element('reset-view').addEventListener('click', () => renderer.resetView());
 element('new-puzzle').addEventListener('click', newPuzzle);
 element('share').addEventListener('click', sharePuzzle);
 window.addEventListener('popstate', onPopState);
@@ -261,6 +262,11 @@ updateDebug();
 function frame(now: number) {
   game.update(now);
   renderer.draw(game, now);
+  for (const [index, button] of buttons.entries()) {
+    const start = renderer.projectPoint(game.puzzle.tracks[index].path[0]);
+    button.style.left = `${start.x * 100}%`;
+    button.style.top = `${start.y * 100}%`;
+  }
   element('timer').textContent = (game.elapsed(now) / 1000).toFixed(3);
   syncInterface();
   if (debugEnabled && now - lastDebugUpdate > 100) {

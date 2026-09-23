@@ -1,374 +1,241 @@
-import { BARRIER, WORLD } from '../game/config';
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { BARRIER, PHYSICS, WORLD } from '../game/config';
 import type { Game } from '../game/Game';
 import { pointAtProgress } from '../game/Track';
 import type { Point, Puzzle, Track } from '../game/types';
-import { projectPoint } from './projection';
-import { rollingOrientation, rotateSurface, type Vector } from './rolling';
-// Fine brushed-metal marks move with the sphere; lighting stays fixed in the scene.
-const surfaceMarks: Vector[] = Array.from({ length: 42 }, (_, i) => {
-    const z = 1 - 2 * (i + .5) / 42;
-    const angle = i * Math.PI * (3 - Math.sqrt(5));
-    const ring = Math.sqrt(1 - z*z);
-    return [Math.cos(angle)*ring, Math.sin(angle)*ring, z];
-});
-function shade(hex: string, factor: number): string {
-    const n = parseInt(hex.slice(1), 16);
-    return `rgb(${[n >> 16, (n >> 8) & 255, n & 255].map(c => Math.round(Math.min(255, c * factor))).join(',')})`;
+import { rollingOrientation } from './rolling';
+
+const DECK = 24;
+const toWorld = (p: Point, lift = 0) => new THREE.Vector3(p.x-WORLD.width/2, (p.z ?? 0)+DECK+lift, p.y-(WORLD.startY+WORLD.finishY)/2);
+
+function printTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width=256; canvas.height=256;
+    const context=canvas.getContext('2d')!;
+    const image=context.createImageData(256,256);
+    for (let y=0;y<256;y++) for (let x=0;x<256;x++) {
+        const value=180+Math.sin(y*Math.PI/2)*16+((x*13+y*37)%17)-8;
+        const i=(y*256+x)*4;
+        image.data[i]=image.data[i+1]=image.data[i+2]=value; image.data[i+3]=255;
+    }
+    context.putImageData(image,0,0);
+    const texture=new THREE.CanvasTexture(canvas);
+    texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
+    return texture;
 }
-interface ChannelSection {
-    floor: Point;
-    sides: { foot: Point; inner: Point; outer: Point; near: boolean }[];
+
+// Sweep a closed, bevelled U section. Its centre is the physical running surface.
+function channelGeometry(track: Track) {
+    const section=[[-24,-5],[-24,14],[-22,17],[-19,17],[-17,14],[-15,3],[-11,0],[11,0],[15,3],[17,14],[19,17],[22,17],[24,14],[24,-5]];
+    const vertices:number[]=[]; const indices:number[]=[]; const uvs:number[]=[];
+    for (let edge=0;edge<section.length;edge++) {
+        const base=vertices.length/3;
+        for (let i=0;i<track.path.length;i++) {
+            const p=track.path[i];
+            const a=track.path[Math.max(0,i-1)]; const b=track.path[Math.min(track.path.length-1,i+1)];
+            const length=Math.hypot(b.x-a.x,b.y-a.y)||1;
+            const nx=-(b.y-a.y)/length; const nz=(b.x-a.x)/length;
+            for (const j of [edge,(edge+1)%section.length]) {
+                const [offset,height]=section[j];
+                const position=toWorld(p,height);
+                vertices.push(position.x+nx*offset,position.y,position.z+nz*offset);
+                uvs.push(offset/48,track.cumulativeLengths[i]/32);
+            }
+            if (i>0) { const n=base+i*2; indices.push(n-2,n-1,n,n-1,n+1,n); }
+        }
+    }
+    const geometry=new THREE.BufferGeometry();
+    geometry.setAttribute('position',new THREE.Float32BufferAttribute(vertices,3));
+    geometry.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
+    geometry.setIndex(indices); geometry.computeVertexNormals();
+    return geometry;
 }
+
 export class Renderer {
-    private context: CanvasRenderingContext2D;
-    private background = document.createElement('canvas');
+    private renderer: THREE.WebGLRenderer;
+    private scene = new THREE.Scene();
+    private camera = new THREE.OrthographicCamera(-600,600,600,-600,1,5000);
+    private controls: OrbitControls;
     private observer: ResizeObserver;
-    private width = 1;
-    private height = 1;
-    private pixelRatio = 1;
-    private channels = new Map<Track, ChannelSection[]>();
-    private railWidth() { return Math.max(20, Math.min(40, this.width / this.puzzle.tracks.length * .25)); }
-    private channelGeometry(track: Track): ChannelSection[] {
-        const points = track.path.map(point => this.position(point));
-        const rail = this.railWidth();
-        return points.map((floor, i) => {
-            const before = points[Math.max(0, i - 2)];
-            const after = points[Math.min(points.length - 1, i + 2)];
-            const length = Math.hypot(after.x-before.x, after.y-before.y) || 1;
-            const nx = -(after.y-before.y)/length;
-            const ny = (after.x-before.x)/length;
-            return { floor, sides: [-1, 1].map(side => ({
-                foot: { x: floor.x+nx*side*rail*.27, y: floor.y+ny*side*rail*.27 },
-                inner: { x: floor.x+nx*side*rail*.40, y: floor.y+ny*side*rail*.40-rail*.46 },
-                outer: { x: floor.x+nx*side*rail*.51, y: floor.y+ny*side*rail*.51-rail*.46 },
-                near: ny*side >= 0,
-            })) };
-        });
-    }
-    private channelWalls(c: CanvasRenderingContext2D, track: Track, foreground = false, progress = 0) {
-        const sections = this.channels.get(track)!;
-        const distance = progress*track.length;
-        // Redraw only walls alongside this ball, so a different height at a crossing
-        // cannot paint over it merely because the paths overlap on screen.
-        const reach = this.railWidth()*WORLD.width/this.width*2;
-        c.lineJoin = 'round';
-        for (let i=1; i<sections.length; i++) {
-            if (foreground && (track.cumulativeLengths[i]<distance-reach || track.cumulativeLengths[i-1]>distance+reach)) continue;
-            for (let side=0; side<2; side++) {
-                const a = sections[i-1].sides[side];
-                const b = sections[i].sides[side];
-                if (foreground && !(a.near && b.near)) continue;
-                const gradient = c.createLinearGradient(a.inner.x,a.inner.y,a.foot.x,a.foot.y+.1);
-                gradient.addColorStop(0,shade(track.color,a.near ? .83 : .62));
-                gradient.addColorStop(1,shade(track.color,.32));
-                c.beginPath();
-                c.moveTo(a.foot.x,a.foot.y); c.lineTo(b.foot.x,b.foot.y);
-                c.lineTo(b.inner.x,b.inner.y); c.lineTo(a.inner.x,a.inner.y);
-                c.closePath(); c.fillStyle=gradient; c.fill();
-                c.strokeStyle=gradient; c.lineWidth=.7; c.stroke();
-                this.polygon(c,[a.inner,b.inner,b.outer,a.outer],shade(track.color,a.near ? 1.15 : 1.38));
-                c.strokeStyle=shade(track.color,a.near ? 1.15 : 1.38); c.lineWidth=.7; c.stroke();
-            }
-        }
-        for (let side=0;side<2;side++) {
-            c.beginPath();
-            let connected=false;
-            for (let i=0;i<sections.length;i++) {
-                const edge=sections[i].sides[side];
-                if (foreground && (!edge.near || Math.abs(track.cumulativeLengths[i]-distance)>reach)) {
-                    connected=false; continue;
-                }
-                if (connected) c.lineTo(edge.inner.x,edge.inner.y);
-                else c.moveTo(edge.inner.x,edge.inner.y);
-                connected=true;
-            }
-            c.strokeStyle=shade(track.color,1.55); c.lineWidth=Math.max(.65,this.railWidth()*.035); c.stroke();
-        }
-    }
+    private assembly = new THREE.Group();
+    private balls: THREE.Mesh[]=[];
+    private gate = new THREE.Group();
+    private texture=printTexture();
+    private environment: THREE.WebGLRenderTarget;
+    private reflection = new THREE.WebGLCubeRenderTarget(128,{generateMipmaps:true,minFilter:THREE.LinearMipmapLinearFilter});
+    private chrome = new THREE.MeshStandardMaterial({color:0xffffff,metalness:1,roughness:.095});
+    private width=1;
+    private height=1;
     constructor(private canvas: HTMLCanvasElement, private puzzle: Puzzle) {
-        const context = canvas.getContext('2d');
-        if (!context)
-            throw new Error('O navegador precisa oferecer suporte a Canvas 2D.');
-        this.context = context;
-        this.observer = new ResizeObserver(() => this.resize());
-        this.observer.observe(canvas);
+        this.renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:true});
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));
+        this.renderer.setClearColor(0xf5f4ef,0);
+        this.renderer.shadowMap.enabled=true;
+        this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+        this.renderer.toneMapping=THREE.ACESFilmicToneMapping;
+        this.renderer.toneMappingExposure=.88;
+        const studio=new RoomEnvironment();
+        const pmrem=new THREE.PMREMGenerator(this.renderer);
+        this.environment=pmrem.fromScene(studio,.04);
+        this.scene.environment=this.environment.texture;
+        this.scene.environmentIntensity=.45;
+        studio.dispose(); pmrem.dispose();
+        this.scene.add(new THREE.HemisphereLight(0xffffff,0x7c7a86,.65));
+        const key=new THREE.DirectionalLight(0xfff7ed,2.2);
+        key.position.set(-450,1100,400); key.castShadow=true;
+        key.shadow.mapSize.set(2048,2048);
+        Object.assign(key.shadow.camera,{left:-750,right:750,top:800,bottom:-800,near:1,far:2200});
+        key.shadow.bias=-.0003; key.shadow.normalBias=1.2;
+        this.scene.add(key);
+        const fill=new THREE.DirectionalLight(0xc9deff,.65); fill.position.set(650,500,-450); this.scene.add(fill);
+        this.scene.add(this.assembly);
+        this.controls=new OrbitControls(this.camera,canvas);
+        this.controls.enablePan=false; this.controls.enableDamping=false;
+        this.controls.minPolarAngle=.25; this.controls.maxPolarAngle=1.3;
+        this.controls.minZoom=.65; this.controls.maxZoom=2;
+        this.controls.target.set(0,65,0);
+        this.controls.addEventListener('change',()=>this.fitCamera());
+        this.resetView();
+        this.setPuzzle(puzzle);
+        this.observer=new ResizeObserver(()=>this.resize()); this.observer.observe(canvas);
         this.resize();
     }
-    setPuzzle(puzzle: Puzzle) { this.puzzle = puzzle; this.drawBackground(); }
+    resetView() {
+        this.camera.position.set(250,1050,1350);
+        this.camera.zoom=1;
+        this.camera.lookAt(0,65,0);
+        this.controls?.target.set(0,65,0); this.controls?.update();
+        this.resize();
+    }
     private resize() {
-        const rect = this.canvas.getBoundingClientRect();
-        this.width = Math.max(1, rect.width);
-        this.height = Math.max(1, rect.height);
-        this.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-        for (const canvas of [this.canvas, this.background]) {
-            canvas.width = Math.round(this.width * this.pixelRatio);
-            canvas.height = Math.round(this.height * this.pixelRatio);
-        }
-        this.drawBackground();
+        const rect=this.canvas.getBoundingClientRect();
+        this.width=Math.max(1,rect.width); this.height=Math.max(1,rect.height);
+        this.fitCamera();
+        this.renderer.setSize(this.width,this.height,false);
     }
-    private position(point: Point, lift = 0): Point {
-        const p = projectPoint(point, lift);
-        return { x: p.x * this.width, y: p.y * this.height };
-    }
-    private polygon(context: CanvasRenderingContext2D, points: Point[], fill: string) {
-        context.beginPath();
-        points.forEach((p, i) => i ? context.lineTo(p.x, p.y) : context.moveTo(p.x, p.y));
-        context.closePath();
-        context.fillStyle = fill;
-        context.fill();
-    }
-    private trace(context: CanvasRenderingContext2D, track: Track, offsetY = 0, ground = false) {
-        context.beginPath();
-        track.path.forEach((p, i) => {
-            const q = this.position(ground ? { ...p, z: 0 } : p);
-            if (i)
-                context.lineTo(q.x, q.y + offsetY);
-            else
-                context.moveTo(q.x, q.y + offsetY);
-        });
-    }
-    private drawBackground() {
-        const c = this.background.getContext('2d')!;
-        c.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
-        c.clearRect(0, 0, this.width, this.height);
-        const small = this.width < 600;
-        const thick = small ? 7 : 15;
-        const rail = this.railWidth();
-        this.channels.clear();
-        for (const track of this.puzzle.tracks) this.channels.set(track,this.channelGeometry(track));
-        const corners = [{ x: 85, y: 20 }, { x: 915, y: 20 }, { x: 915, y: 565 }, { x: 85, y: 565 }].map(p => {
-            const q = this.position(p);
-            return { x: q.x, y: q.y + thick };
-        });
-        const [a, b, d, e] = corners;
-        c.save();
-        c.shadowColor = '#00000070';
-        c.shadowBlur = small ? 18 : 38;
-        c.shadowOffsetY = 20;
-        this.polygon(c, corners, '#343e48');
-        c.restore();
-        this.polygon(c, [e, d, { x: d.x, y: d.y + thick }, { x: e.x, y: e.y + thick }], '#172129');
-        this.polygon(c, [b, d, { x: d.x, y: d.y + thick }, { x: b.x, y: b.y + thick }], '#26323b');
-        const slab = c.createLinearGradient(a.x, a.y, d.x, d.y);
-        slab.addColorStop(0, '#586573');
-        slab.addColorStop(1, '#313e49');
-        c.beginPath();
-        corners.forEach((p, i) => i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y));
-        c.closePath();
-        c.fillStyle = slab;
-        c.fill();
-        c.strokeStyle = '#8193a14d';
-        c.lineWidth = 1;
-        c.stroke();
-        for (const p of corners) {
-            c.beginPath();
-            c.ellipse(p.x + (p.x < this.width / 2 ? 8 : -8), p.y + (p.y < this.height / 2 ? 10 : -8), 3, 2, 0, 0, Math.PI * 2);
-            c.fillStyle = '#a0a9ae';
-            c.fill();
-        }
-        c.lineCap = 'round';
-        c.lineJoin = 'round';
-        for (const track of this.puzzle.tracks) {
-            const color = track.color;
-            for (const ratio of [0, 0.18, 0.33, 0.5, 0.65, 0.82]) {
-                const location = pointAtProgress(track, ratio);
-                const p = this.position(location);
-                const depth = this.position({ ...location, z: 0 }).y - p.y;
-                c.fillStyle = shade(color, 0.48);
-                c.fillRect(p.x - rail * 0.2, p.y, rail * 0.4, depth + thick);
-                c.fillStyle = shade(color, 0.75);
-                c.fillRect(p.x - rail * 0.2, p.y, rail * 0.13, depth + thick);
-            }
-            c.save();
-            c.shadowColor = '#10192370';
-            c.shadowBlur = 9;
-            c.shadowOffsetX = 3;
-            c.shadowOffsetY = 9;
-            this.trace(c, track, thick, true);
-            c.strokeStyle = '#111a2455';
-            c.lineWidth = rail + 5;
-            c.stroke();
-            c.restore();
-            c.lineCap='butt';
-            for (let y = thick; y >= -rail*.46; y -= 2) {
-                this.trace(c, track, y);
-                c.strokeStyle = shade(color, 0.42 + 0.24 * (1 - Math.max(0,y) / thick));
-                c.lineWidth = rail;
-                c.stroke();
-            }
-            this.trace(c, track);
-            c.strokeStyle = shade(color, 0.32);
-            c.lineWidth = rail * 0.77;
-            c.stroke();
-            this.trace(c, track);
-            c.strokeStyle = shade(color,.65);
-            c.lineWidth = rail * 0.52;
-            c.stroke();
-            this.trace(c, track, 1);
-            c.strokeStyle = shade(color,.86);
-            c.lineWidth = rail * 0.28;
-            c.stroke();
-            this.channelWalls(c,track);
-            const start = this.position(track.path[0]);
-            c.beginPath();
-            c.ellipse(start.x, start.y + 4, rail * .77, rail * .5, 0, 0, Math.PI * 2);
-            c.fillStyle = shade(color, .5);
-            c.fill();
-            c.beginPath();
-            c.ellipse(start.x, start.y, rail * .77, rail * .5, 0, 0, Math.PI * 2);
-            c.fillStyle = shade(color,.38);
-            c.fill();
-            c.strokeStyle = shade(color, 1.4);
-            c.lineWidth = 2;
-            c.stroke();
-            c.fillStyle = '#bac9d3';
-            c.font = `600 ${small ? 9 : 11}px ui-monospace,monospace`;
-            c.textAlign = 'center';
-            
-            const finish = this.position(track.path[track.path.length - 1]);
-            c.beginPath();
-            c.ellipse(finish.x, finish.y + 4, rail * .67, rail * .35, 0, 0, Math.PI * 2);
-            c.fillStyle = '#15222e';
-            c.fill();
-            c.strokeStyle = shade(color, .85);
-            c.lineWidth = 2;
-            c.stroke();
-        }
-        const left = this.position({ x: 30, y: WORLD.finishY + 27 });
-        const right = this.position({ x: 970, y: WORLD.finishY + 27 });
-        c.strokeStyle = '#a6b8c266';
-        c.lineWidth = 1;
-        c.beginPath();
-        c.moveTo(left.x, left.y);
-        c.lineTo(right.x, right.y);
-        c.stroke();
-        c.font = `600 ${small ? 7 : 9}px ui-monospace,monospace`;
-        c.textAlign = 'center';
-        c.fillStyle = '#b3c2cd';
-        c.fillText('CHEGADA  /  SYNC BALLS RACING', this.width * .5, this.height * .89);
-    }
-    private barrier(game: Game) {
-        const c = this.context;
-        const closed = game.firstArrivalAt !== null && game.result?.outcome !== 'success';
-        const lift = closed ? 7 : -11;
-        const a = this.position({ x: 95, y: BARRIER.topY }, lift);
-        const b = this.position({ x: 905, y: BARRIER.topY }, lift);
-        const h = closed ? (this.width < 600 ? 8 : 14) : 4;
-        c.save();
-        c.lineCap = 'round';
-        for (const p of [a, b]) {
-            c.fillStyle = '#17212a';
-            c.fillRect(p.x - 5, p.y - 8, 10, 23);
-            c.fillStyle = '#8795a0';
-            c.fillRect(p.x - 5, p.y - 8, 3, 23);
-            c.beginPath();
-            c.arc(p.x, p.y - 3, 2, 0, Math.PI * 2);
-            c.fillStyle = closed ? '#ff9c68' : '#7cf2b4';
-            c.fill();
-        }
-        c.shadowColor = '#00000088';
-        c.shadowBlur = 5;
-        c.shadowOffsetY = 4;
-        this.polygon(c, [a, b, { x: b.x, y: b.y + h }, { x: a.x, y: a.y + h }], closed ? '#d49a4b' : '#73838a');
-        c.shadowColor = 'transparent';
-        c.save();
-        c.beginPath();
-        c.moveTo(a.x, a.y);
-        c.lineTo(b.x, b.y);
-        c.lineTo(b.x, b.y + h);
-        c.lineTo(a.x, a.y + h);
-        c.closePath();
-        c.clip();
-        if (closed) {
-            c.strokeStyle = '#26313b';
-            c.lineWidth = this.width < 600 ? 5 : 9;
-            for (let x = a.x - 20; x < b.x + 20; x += this.width < 600 ? 14 : 26) {
-                c.beginPath();
-                c.moveTo(x, a.y + 30);
-                c.lineTo(x + 30, a.y - 15);
-                c.stroke();
+    private fitCamera() {
+        const aspect=this.width/this.height;
+        this.camera.updateMatrixWorld();
+        let extentX=0; let extentY=0;
+        for(const x of [-(WORLD.width-100)/2,(WORLD.width-100)/2]) {
+            for(const y of [-15,DECK+200]) for(const z of [-(WORLD.finishY-WORLD.startY+110)/2,(WORLD.finishY-WORLD.startY+110)/2]) {
+                const corner=new THREE.Vector3(x,y,z).applyMatrix4(this.camera.matrixWorldInverse);
+                extentX=Math.max(extentX,Math.abs(corner.x)); extentY=Math.max(extentY,Math.abs(corner.y));
             }
         }
-        c.restore();
-        c.beginPath();
-        c.moveTo(a.x, a.y);
-        c.lineTo(b.x, b.y);
-        c.strokeStyle = closed ? '#ffe0a0' : '#acbdc6';
-        c.lineWidth = 1.5;
-        c.stroke();
-        c.restore();
+        const halfHeight=Math.max(extentY+22,(extentX+22)/aspect);
+        this.camera.left=-halfHeight*aspect; this.camera.right=halfHeight*aspect;
+        this.camera.top=halfHeight; this.camera.bottom=-halfHeight;
+        this.camera.updateProjectionMatrix();
+    }
+    projectPoint(point: Point, lift=PHYSICS.ballRadius) {
+        const position=toWorld(point,lift).project(this.camera);
+        return {x:(position.x+1)/2,y:(1-position.y)/2};
+    }
+    private mesh(geometry: THREE.BufferGeometry, material: THREE.Material, position?: THREE.Vector3) {
+        const mesh=new THREE.Mesh(geometry,material);
+        if(position) mesh.position.copy(position);
+        mesh.castShadow=true; mesh.receiveShadow=true; this.assembly.add(mesh); return mesh;
+    }
+    private strut(a: THREE.Vector3,b: THREE.Vector3,radius: number,material: THREE.Material) {
+        const direction=b.clone().sub(a);
+        const mesh=this.mesh(new THREE.CylinderGeometry(radius,radius,direction.length(),10),material,a.clone().add(b).multiplyScalar(.5));
+        mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),direction.normalize());
+    }
+    private clearAssembly() {
+        const geometries=new Set<THREE.BufferGeometry>(); const materials=new Set<THREE.Material>();
+        this.assembly.traverse(object=>{ if(object instanceof THREE.Mesh) {
+            geometries.add(object.geometry);
+            const list=Array.isArray(object.material)?object.material:[object.material];
+            list.forEach(material=>{if(material!==this.chrome) materials.add(material);});
+        }});
+        geometries.forEach(g=>g.dispose()); materials.forEach(m=>m.dispose());
+        this.assembly.clear(); this.balls=[];
+    }
+    private batchStaticMeshes() {
+        const groups=new Map<THREE.Material,THREE.Mesh[]>();
+        for(const object of this.assembly.children) {
+            if(!(object instanceof THREE.Mesh) || this.balls.includes(object) || Array.isArray(object.material)) continue;
+            const meshes=groups.get(object.material) ?? [];
+            meshes.push(object); groups.set(object.material,meshes);
+        }
+        for(const [material,meshes] of groups) {
+            if(meshes.length<2) continue;
+            const geometries=meshes.map(mesh=>{mesh.updateMatrix();return mesh.geometry.clone().applyMatrix4(mesh.matrix);});
+            const merged=mergeGeometries(geometries);
+            geometries.forEach(geometry=>geometry.dispose());
+            if(!merged) continue;
+            meshes.forEach(mesh=>{this.assembly.remove(mesh);mesh.geometry.dispose();});
+            this.mesh(merged,material);
+        }
+    }
+    setPuzzle(puzzle: Puzzle) {
+        this.puzzle=puzzle; this.clearAssembly();
+        const base=new THREE.MeshStandardMaterial({color:0xbbb9c2,metalness:.25,roughness:.44,bumpMap:this.texture,bumpScale:.22});
+        const depth=WORLD.finishY-WORLD.startY+100;
+        const width=WORLD.width-110;
+        this.mesh(new THREE.BoxGeometry(width,14,depth),base,new THREE.Vector3(0,0,0));
+        for(const x of [-width/2,width/2]) this.mesh(new THREE.BoxGeometry(8,22,depth),base,new THREE.Vector3(x,10,0));
+        for(const z of [-depth/2,depth/2]) this.mesh(new THREE.BoxGeometry(width,22,8),base,new THREE.Vector3(0,10,z));
+        const table=new THREE.ShadowMaterial({color:0x343443,opacity:.18});
+        this.mesh(new THREE.BoxGeometry(10000,8,10000),table,new THREE.Vector3(0,-22,0));
+        const sphere=new THREE.SphereGeometry(PHYSICS.ballRadius,40,28);
+        for(const track of puzzle.tracks) {
+            const plastic=new THREE.MeshPhysicalMaterial({color:track.color,roughness:.34,metalness:0,clearcoat:.22,clearcoatRoughness:.3,bumpMap:this.texture,bumpScale:.14,side:THREE.DoubleSide});
+            this.mesh(channelGeometry(track),plastic);
+            for(const progress of [0,.14,.29,.44,.59,.74,.89]) {
+                const point=pointAtProgress(track,progress); const top=toWorld(point,-6);
+                if(top.y<32) continue;
+                for(const sign of [-1,1]) {
+                    const foot=new THREE.Vector3(top.x+sign*15,9,top.z);
+                    this.strut(foot,new THREE.Vector3(top.x+sign*15,top.y,top.z),4.5,plastic);
+                    this.mesh(new THREE.CylinderGeometry(9,11,4,16),plastic,new THREE.Vector3(foot.x,9,foot.z));
+                }
+                this.strut(new THREE.Vector3(top.x-15,12,top.z),new THREE.Vector3(top.x+15,top.y-3,top.z),3,plastic);
+                this.strut(new THREE.Vector3(top.x+15,12,top.z),new THREE.Vector3(top.x-15,top.y-3,top.z),3,plastic);
+            }
+            const ball=this.mesh(sphere,this.chrome,toWorld(track.path[0],PHYSICS.ballRadius));
+            this.balls.push(ball);
+        }
+        this.gate=new THREE.Group();
+        const barMaterial=new THREE.MeshStandardMaterial({color:0x626672,metalness:.72,roughness:.28});
+        const barWidth=WORLD.width-174;
+        const bar=new THREE.Mesh(new THREE.BoxGeometry(barWidth,17,5),barMaterial); bar.castShadow=true;
+        this.gate.add(bar);
+        this.gate.position.set(0,DECK-15,BARRIER.topY-(WORLD.startY+WORLD.finishY)/2);
+        this.assembly.add(this.gate);
+        for(const x of [-barWidth/2,barWidth/2]) this.mesh(new THREE.BoxGeometry(12,40,18),base,new THREE.Vector3(x,20,this.gate.position.z));
+        this.batchStaticMeshes();
+        this.balls.forEach(ball=>ball.visible=false);
+        const softboxes=new THREE.Group();
+        const lightPanel=new THREE.MeshBasicMaterial({color:0xffffff});
+        const panelGeometry=new THREE.PlaneGeometry(520,800);
+        for(const position of [new THREE.Vector3(-650,700,150),new THREE.Vector3(450,900,-350)]) {
+            const panel=new THREE.Mesh(panelGeometry,lightPanel); panel.position.copy(position); panel.lookAt(0,100,0); softboxes.add(panel);
+        }
+        this.scene.add(softboxes);
+        this.scene.background=new THREE.Color(0x55555c);
+        const cube=new THREE.CubeCamera(1,3000,this.reflection); cube.position.set(0,170,50);
+        cube.update(this.renderer,this.scene);
+        this.scene.background=null; this.scene.remove(softboxes); panelGeometry.dispose(); lightPanel.dispose();
+        this.chrome.envMap=this.reflection.texture; this.chrome.envMapIntensity=1.25; this.chrome.needsUpdate=true;
+        this.balls.forEach(ball=>ball.visible=true);
     }
     draw(game: Game, _now: number) {
-        const c = this.context;
-        c.setTransform(1, 0, 0, 1, 0, 0);
-        c.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        c.drawImage(this.background, 0, 0);
-        c.setTransform(this.pixelRatio, 0, 0, this.pixelRatio, 0, 0);
-        const small = this.width < 600;
-        const r = this.railWidth()*.31;
-        this.barrier(game);
-        for (const ball of [...game.balls].sort((a, b) => pointAtProgress(this.puzzle.tracks[a.trackId], a.progress).y - pointAtProgress(this.puzzle.tracks[b.trackId], b.progress).y)) {
-            const track = this.puzzle.tracks[ball.trackId];
-            const floor = this.position(pointAtProgress(track, ball.progress));
-            const p = {x:floor.x,y:floor.y-r*.64};
-            c.save();
-            c.beginPath();
-            c.ellipse(floor.x+1, floor.y+1, r*.95, r*.32, 0, 0, Math.PI*2);
-            c.fillStyle = '#081018bb';
-            c.shadowColor = '#00000055';
-            c.shadowBlur = 5;
-            c.fill();
-            c.restore();
-            const g = c.createRadialGradient(p.x - r * .4, p.y - r * .5, 1, p.x, p.y, r * 1.15);
-            g.addColorStop(0, '#ffffff');
-            g.addColorStop(.18, '#f3f7fb');
-            g.addColorStop(.38, '#b9c8d2');
-            g.addColorStop(.52, '#637986');
-            g.addColorStop(.65, '#e0e8eb');
-            g.addColorStop(.83, '#77929e');
-            g.addColorStop(1, '#253845');
-            c.beginPath();
-            c.arc(p.x, p.y, r, 0, Math.PI * 2);
-            c.fillStyle = g;
-            c.fill();
-            c.strokeStyle = '#dbeaf466';
-            c.lineWidth = 1;
-            c.stroke();
-            const orientation = rollingOrientation(track, ball.progress);
-            for (const mark of surfaceMarks) {
-                const [x, y, z] = rotateSurface(orientation, mark);
-                const facing = .62*y + .785*z;
-                if (facing <= .08) continue;
-                const screenY = .785*y - .62*z;
-                c.beginPath();
-                c.ellipse(p.x+x*r*.95, p.y+screenY*r*.95, Math.max(.35,r*.045), Math.max(.2,r*.022), -.4, 0, Math.PI*2);
-                c.fillStyle = `rgba(38,54,65,${.38*facing})`;
-                c.fill();
-            }
-            c.beginPath();
-            c.arc(p.x, p.y, r * .8, .2, 2.8);
-            c.strokeStyle = '#c9d6de';
-            c.lineWidth = 2;
-            c.stroke();
-            if (ball.progress>0 && ball.progress<1) {
-                c.save();
-                c.beginPath(); c.arc(p.x,p.y,r+1,0,Math.PI*2); c.clip();
-                this.channelWalls(c,track,true,ball.progress);
-                c.restore();
-            }
-            c.textAlign = 'center';
-            c.textBaseline = 'alphabetic';
-            if (game.result) {
-                const end = this.position(track.path[track.path.length - 1]);
-                const arrival = game.result.arrivals.find(item => item.trackId === track.id);
-                const label = arrival ? (arrival.offset === 0 ? 'primeira' : `+${Math.round(arrival.offset)} ms`) : ball.state === 'running' ? '↓ faixa' : 'retida';
-                c.fillStyle = arrival ? '#bcebd1' : '#edbc95';
-                c.font = `500 ${small ? 8 : 10}px ui-monospace,monospace`;
-                c.fillText(label, end.x, end.y + 24);
-            }
-        }
+        game.balls.forEach((ball,i)=>{
+            const mesh=this.balls[i];
+            mesh.position.copy(toWorld(pointAtProgress(this.puzzle.tracks[i],ball.progress),PHYSICS.ballRadius));
+            const [x,y,z,w]=rollingOrientation(this.puzzle.tracks[i],ball.progress);
+            mesh.quaternion.set(-x,-z,-y,w);
+        });
+        this.gate.position.y=game.firstArrivalAt!==null && game.result?.outcome!=='success' ? DECK+18 : DECK-15;
+        this.renderer.render(this.scene,this.camera);
     }
-    destroy() { this.observer.disconnect(); }
+    destroy() {
+        this.observer.disconnect(); this.controls.dispose(); this.clearAssembly();
+        this.texture.dispose(); this.chrome.dispose(); this.environment.dispose(); this.reflection.dispose(); this.renderer.dispose();
+    }
 }
-
-

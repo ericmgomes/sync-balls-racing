@@ -14,37 +14,18 @@ function shuffled<T>(values: T[], random: Random): T[] {
   return result;
 }
 
-function cubic(a: Point, b: Point, c: Point, d: Point, t: number): Point {
-  const u = 1 - t;
-  return {
-    x: u * u * u * a.x + 3 * u * u * t * b.x + 3 * u * t * t * c.x + t * t * t * d.x,
-    y: u * u * u * a.y + 3 * u * u * t * b.y + 3 * u * t * t * c.y + t * t * t * d.y,
-  };
-}
-
-function sweep(anchors: Point[]): Point[] {
-  const path = [anchors[0]];
-  for (let index = 1; index < anchors.length; index++) {
-    const start = anchors[index - 1];
-    const end = anchors[index];
-    const bend = (end.y - start.y) * 0.56;
-    for (let sample = 1; sample <= 48; sample++) {
-      path.push(cubic(start, { x: start.x, y: start.y + bend }, { x: end.x, y: end.y - bend }, end, sample / 48));
-    }
-  }
-  return path;
-}
-
 function mix(a: Point, b: Point, t: number): Point {
   return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
 }
 
-function roundedZigzag(anchors: Point[]): Point[] {
+function roundedZigzag(anchors: Point[], halfWidth: number): Point[] {
   const path = [anchors[0]];
   for (let index = 1; index < anchors.length - 1; index++) {
     const corner = anchors[index];
-    const entry = mix(corner, anchors[index - 1], 0.27);
-    const exit = mix(corner, anchors[index + 1], 0.27);
+    const span = (p: Point) => Math.hypot((p.x-corner.x)*halfWidth,(p.y-corner.y)*(WORLD.finishY-WORLD.startY));
+    const radius = Math.min(26,span(anchors[index-1])*.4,span(anchors[index+1])*.4);
+    const entry = mix(corner, anchors[index - 1], radius/span(anchors[index-1]));
+    const exit = mix(corner, anchors[index + 1], radius/span(anchors[index+1]));
     path.push(entry);
     for (let sample = 1; sample <= 24; sample++) {
       const t = sample / 24;
@@ -55,54 +36,25 @@ function roundedZigzag(anchors: Point[]): Point[] {
   return path;
 }
 
-function makeFamily(family: number, random: Random): Point[] {
-  const start = { x: 0, y: 0 };
-  const finish = { x: 0, y: 1 };
-  const sway = 0.76 + random() * 0.17;
-  const shift = (random() - 0.5) * 0.06;
-
-  switch (family) {
-    case 0:
-      return sweep([start, { x: -sway, y: 0.25 + shift }, { x: sway, y: 0.71 + shift }, finish]);
-    case 1:
-      return sweep([start, { x: sway, y: 0.16 }, { x: -sway, y: 0.37 + shift }, { x: sway, y: 0.60 }, { x: -sway, y: 0.82 + shift }, finish]);
-    case 2:
-      return roundedZigzag([
-        start, { x: 0, y: 0.11 }, { x: -sway, y: 0.11 }, { x: -sway, y: 0.32 + shift },
-        { x: sway, y: 0.32 + shift }, { x: sway, y: 0.59 }, { x: -sway, y: 0.59 },
-        { x: -sway, y: 0.85 }, { x: 0, y: 0.85 }, finish,
-      ]);
-    case 3: {
-      const loopDepth = 0.27 + random() * 0.035;
-      return Array.from({ length: 401 }, (_, index) => {
-        const t = index / 400;
-        const angle = t * Math.PI * 2;
-        return {
-          x: (-0.45 * (1 - Math.cos(angle)) + 0.50 * (1 - Math.cos(angle * 2))) * sway,
-          y: t + Math.sin(angle) * loopDepth,
-        };
-      });
-    }
-    case 4:
-      return sweep([start, { x: sway, y: 0.14 }, { x: -sway, y: 0.31 + shift }, { x: sway, y: 0.48 }, { x: -sway * 0.22, y: 0.77 }, finish]);
-    case 5:
-      return roundedZigzag([
-        start, { x: sway, y: 0.15 }, { x: -sway, y: 0.34 + shift },
-        { x: sway, y: 0.53 }, { x: -sway, y: 0.72 + shift }, { x: sway * 0.4, y: 0.89 }, finish,
-      ]);
-    case 6:
-      return sweep([start, { x: sway * 0.18, y: 0.26 }, { x: sway, y: 0.46 + shift }, { x: -sway, y: 0.64 }, { x: sway, y: 0.82 }, finish]);
-    default:
-      return roundedZigzag([
-        start, { x: -sway, y: 0.13 }, { x: -sway, y: 0.65 }, { x: -sway * 0.12, y: 0.65 },
-        { x: -sway * 0.12, y: 0.29 }, { x: sway, y: 0.29 }, { x: sway, y: 0.85 }, finish,
-      ]);
+function makeFamily(family: number, random: Random, halfWidth: number): Point[] {
+  const steps = 3 + family % 4;
+  const sway = 0.58 + random() * 0.10;
+  const anchors: Point[] = [{x:0,y:0}, {x:0,y:0.07}];
+  let previousY = 0.07;
+  for (let step = 0; step < steps; step++) {
+    const sign = step % 2 === 0 ? 1 : -1;
+    const x = sign * sway * (family >= 4 && step % 2 ? 0.72 : 1);
+    anchors.push({x,y:previousY});
+    const y = 0.07 + (step + 1) * (0.82 / steps) + (random() - .5) * .025;
+    anchors.push({x,y});
+    previousY = y;
   }
+  anchors.push({x:0,y:previousY}, {x:0,y:1});
+  return roundedZigzag(anchors,halfWidth);
 }
-
 function geometry(family: number, centerX: number, halfWidth: number, random: Random): Pick<Track, 'path' | 'cumulativeLengths' | 'length'> {
   const mirror = random() < 0.5 ? -1 : 1;
-  const path = makeFamily(family, random).map((point) => ({
+  const path = makeFamily(family, random, halfWidth).map((point) => ({
     x: centerX + point.x * halfWidth * mirror,
     y: WORLD.startY + point.y * (WORLD.finishY - WORLD.startY),
   }));
@@ -115,10 +67,10 @@ function geometry(family: number, centerX: number, halfWidth: number, random: Ra
   }
   const profile = [
     { t: 0, z: 180 },
-    { t: 0.14 + random() * 0.04, z: 60 + random() * 15 },
-    { t: 0.30 + random() * 0.04, z: 125 + random() * 20 },
-    { t: 0.48 + random() * 0.03, z: 24 + random() * 12 },
-    { t: 0.63 + random() * 0.03, z: 80 + random() * 20 },
+    { t: 0.14 + random() * 0.04, z: 100 + random() * 10 },
+    { t: 0.30 + random() * 0.04, z: 125 + random() * 10 },
+    { t: 0.48 + random() * 0.03, z: 45 + random() * 10 },
+    { t: 0.63 + random() * 0.03, z: 70 + random() * 10 },
     { t: 0.83, z: 10 },
     { t: 1, z: 0 },
   ];

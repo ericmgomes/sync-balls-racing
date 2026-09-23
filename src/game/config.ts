@@ -1,8 +1,8 @@
 import type { Difficulty } from './types';
 
-export const WORLD = { width: 1000, height: 590, startY: 66, finishY: 514, marginX: 110 } as const;
+export const WORLD = { width: 820, height: 850, startY: 66, finishY: 774, marginX: 110 } as const;
 
-export const BARRIER = { topY: 468, bottomY: WORLD.finishY, clearance: 20 } as const;
+export const BARRIER = { topY: WORLD.finishY - 46, bottomY: WORLD.finishY, clearance: 20 } as const;
 
 export const PHYSICS = {
   // World distances are millimetres; velocities use mm/s, time uses seconds.
@@ -23,12 +23,12 @@ export const DIFFICULTIES: Record<Difficulty, { trackCount: number }> = {
 };
 
 export const TRACK_COLORS = [
-  { color: '#f05252', name: 'Coral' },
-  { color: '#f49b27', name: 'Âmbar' },
-  { color: '#e7c52e', name: 'Dourada' },
-  { color: '#36b88b', name: 'Jade' },
-  { color: '#359de8', name: 'Azul' },
-  { color: '#9060db', name: 'Lilás' },
+  { color: '#ee241b', name: 'Coral' },
+  { color: '#ffac00', name: 'Âmbar' },
+  { color: '#ffe000', name: 'Dourada' },
+  { color: '#00a36a', name: 'Jade' },
+  { color: '#245de8', name: 'Azul' },
+  { color: '#8441d9', name: 'Lilás' },
   { color: '#dd6ea8', name: 'Rosa' },
   { color: '#35b6bd', name: 'Turquesa' },
 ] as const;

@@ -4,11 +4,11 @@ Jogue em https://ericmgomes.github.io/sync-balls-racing/.
 
 O workflow `.github/workflows/deploy.yml` executa os testes, gera o build e publica no GitHub Pages a cada push na branch `main`.
 
-Puzzle de sincronia em Vite + TypeScript + Canvas 2D, sem framework UI, backend ou banco de dados.
+Puzzle de sincronia em Vite + TypeScript + Three.js (WebGL 2), sem framework UI, backend ou banco de dados.
 
 Todas as bolas têm o mesmo acabamento metálico prateado, sem números; as cores identificam as pistas. As pistas ficam agrupadas e têm dois trechos de subida entre descidas. A altura participa tanto do desenho quanto da física; o comprimento considera as três dimensões. O gerador valida a passagem levando em conta as perdas de energia.
 
-O tabuleiro usa uma apresentação 2.5D desenhada em Canvas: projeção em perspectiva, pistas com espessura e apoios, sombras, esferas metálicas e barreira mecânica. Desenho e alvos de clique compartilham a mesma projeção. A física continua calculada nas coordenadas da pista, independente da tela. Não exige WebGL, assets externos ou uma biblioteca 3D.
+O tabuleiro é um modelo 3D com canaletas abertas, trechos ortogonais, cantos arredondados, paredes chanfradas e suportes vazados. Materiais de plástico com textura procedural, esferas cromadas, reflexos capturados da cena e sombras projetadas aproximam a aparência do brinquedo físico. Arraste para girar, use a roda do mouse ou pinça para aproximar e clique em **Restaurar vista** para voltar. Os alvos de clique acompanham a câmera. Exige WebGL 2; todos os modelos e texturas são gerados localmente, sem carregar assets externos.
 
 ## Executar
 
@@ -31,7 +31,7 @@ Vitórias mostram a diferença entre as chegadas e salvam o melhor resultado. De
 
 ## Física
 
-Uma unidade do mundo corresponde a 1 mm: o tabuleiro tem 1 m de largura e a largada fica a 18 cm de altura. A gravidade é 9.810 mm/s² (9,81 m/s²), sem câmera lenta. O raio das bolas é 12 mm. A textura metálica gira pela distância percorrida (ângulo = distância / raio), acumulando a orientação nas curvas; os reflexos da iluminação permanecem fixos na cena.
+Uma unidade do mundo corresponde a 1 mm: a base mede aproximadamente 71 × 81 cm e a largada fica 18 cm acima do nível final. A gravidade é 9.810 mm/s² (9,81 m/s²), sem câmera lenta. O raio das bolas é 12 mm. A orientação das esferas acompanha a distância percorrida (ângulo = distância / raio), acumulando a rotação nas curvas. Os reflexos vêm de uma captura estática do tabuleiro, não de ray tracing em tempo real.
 
 Referência para rolamento sem deslizamento e inércia: [OpenStax — Rolling Motion](https://openstax.org/books/university-physics-volume-1/pages/11-1-rolling-motion). Os testes comparam uma rampa sem perdas à solução analítica de uma esfera maciça e verificam a equivalência entre metros e milímetros.
 
@@ -52,13 +52,13 @@ A faixa e o prazo de chegada usam timestamps independentes dos frames. O resulta
 - `src/game/Track.ts`: interpolação da posição no caminho.
 - `src/game/types.ts` e `config.ts`: modelos e configurações.
 - `src/generation/`: RNG e geometria determinísticos.
-- `src/rendering/Renderer.ts`: pistas, bolas e chegada no Canvas.
+- `src/rendering/Renderer.ts`: modelo 3D, câmera, materiais, iluminação, bolas e barreira.
 - `src/input/InputManager.ts`: teclado.
 - `src/storage/scores.ts`: tentativas e recordes locais.
 - `src/styles/main.css`: layout responsivo.
 - `tests/`: física, geração, sincronização, bloqueio e persistência.
 
-A arquitetura prevê Easy (4 bolas), Normal (6) e Hard (8); a interface usa Normal. O armazenamento é separado por seed e dificuldade, com fallback em memória se localStorage estiver bloqueado. Cada abertura ou reinício conta uma tentativa. A versão v5 dos recordes separa a escala física atual dos resultados antigos, que permanecem intactos no armazenamento.
+A arquitetura prevê Easy (4 bolas), Normal (6) e Hard (8); a interface usa Normal. O armazenamento é separado por seed e dificuldade, com fallback em memória se localStorage estiver bloqueado. Cada abertura ou reinício conta uma tentativa. A versão v6 dos recordes separa as pistas 3D atuais dos resultados antigos, que permanecem intactos no armazenamento.
 
 ## Limites do MVP
 
