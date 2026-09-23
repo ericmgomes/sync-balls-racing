@@ -94,6 +94,9 @@ export class Renderer {
         this.scene.add(this.assembly);
         this.controls=new OrbitControls(this.camera,canvas);
         this.controls.enablePan=false; this.controls.enableDamping=false;
+        this.controls.enableRotate=true;
+        this.controls.mouseButtons={LEFT:THREE.MOUSE.ROTATE,MIDDLE:THREE.MOUSE.DOLLY,RIGHT:THREE.MOUSE.ROTATE};
+        this.controls.touches={ONE:THREE.TOUCH.ROTATE,TWO:THREE.TOUCH.DOLLY_ROTATE};
         this.controls.minPolarAngle=.25; this.controls.maxPolarAngle=1.3;
         this.controls.minZoom=.65; this.controls.maxZoom=2;
         this.controls.target.set(0,65,0);
@@ -109,6 +112,12 @@ export class Renderer {
         this.camera.lookAt(0,65,0);
         this.controls?.target.set(0,65,0); this.controls?.update();
         this.resize();
+    }
+    rotateView(direction: number) {
+        const offset=this.camera.position.clone().sub(this.controls.target);
+        offset.applyAxisAngle(new THREE.Vector3(0,1,0),direction*Math.PI/12);
+        this.camera.position.copy(this.controls.target).add(offset);
+        this.controls.update();
     }
     private resize() {
         const rect=this.canvas.getBoundingClientRect();

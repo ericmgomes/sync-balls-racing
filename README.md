@@ -31,7 +31,7 @@ Vitórias mostram a diferença entre as chegadas e salvam o melhor resultado. De
 
 ## Física
 
-Uma unidade do mundo corresponde a 1 mm: a base mede aproximadamente 71 × 81 cm e a largada fica 18 cm acima do nível final. A gravidade é 9.810 mm/s² (9,81 m/s²), sem câmera lenta. O raio das bolas é 12 mm. A orientação das esferas acompanha a distância percorrida (ângulo = distância / raio), acumulando a rotação nas curvas. Os reflexos vêm de uma captura estática do tabuleiro, não de ray tracing em tempo real.
+Uma unidade do mundo corresponde a 1 mm: a base mede aproximadamente 71 × 81 cm e a largada fica 18 cm acima do nível final. A gravidade é 9.810 mm/s² (9,81 m/s²), com reprodução a 75% da velocidade física: partidas, chegadas e cronômetro compartilham o mesmo relógio. O raio das bolas é 12 mm. A orientação das esferas acompanha a distância percorrida (ângulo = distância / raio), acumulando a rotação nas curvas. Os reflexos vêm de uma captura estática do tabuleiro, não de ray tracing em tempo real.
 
 Referência para rolamento sem deslizamento e inércia: [OpenStax — Rolling Motion](https://openstax.org/books/university-physics-volume-1/pages/11-1-rolling-motion). Os testes comparam uma rampa sem perdas à solução analítica de uma esfera maciça e verificam a equivalência entre metros e milímetros.
 
@@ -58,7 +58,7 @@ A faixa e o prazo de chegada usam timestamps independentes dos frames. O resulta
 - `src/styles/main.css`: layout responsivo.
 - `tests/`: física, geração, sincronização, bloqueio e persistência.
 
-A arquitetura prevê Easy (4 bolas), Normal (6) e Hard (8); a interface usa Normal. O armazenamento é separado por seed e dificuldade, com fallback em memória se localStorage estiver bloqueado. Cada abertura ou reinício conta uma tentativa. A versão v6 dos recordes separa as pistas 3D atuais dos resultados antigos, que permanecem intactos no armazenamento.
+A arquitetura prevê Easy (4 bolas), Normal (6) e Hard (8); a interface usa Normal. O armazenamento é separado por seed e dificuldade, com fallback em memória se localStorage estiver bloqueado. Cada abertura ou reinício conta uma tentativa. A versão v7 dos recordes separa as pistas 3D atuais dos resultados antigos, que permanecem intactos no armazenamento.
 
 ## Limites do MVP
 

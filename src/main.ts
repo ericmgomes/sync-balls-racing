@@ -1,6 +1,6 @@
 import './styles/main.css';
 import { Game } from './game/Game';
-import { getRating, PHYSICS } from './game/config';
+import { getRating, PHYSICS, simulationTime } from './game/config';
 import { createSeed, generatePuzzle, parseSeed } from './generation/generatePuzzle';
 import { InputManager } from './input/InputManager';
 import { Renderer } from './rendering/Renderer';
@@ -36,7 +36,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
         <span class="board-caption"><span class="live-dot"></span><span id="phase">PRONTO QUANDO VOCÊ ESTIVER</span></span>
         <span class="elapsed" aria-label="Tempo da tentativa"><span id="timer">0.000</span><small>s</small></span>
       </div>
-      <div class="view-controls"><span>Arraste o tabuleiro para girar</span><button id="reset-view" type="button">Restaurar vista</button></div>
+      <div class="view-controls"><span>Ritmo 75% · arraste para girar · pinça/roda para zoom</span><button id="rotate-left" type="button" aria-label="Girar para a esquerda" title="Girar para a esquerda">↶</button><button id="rotate-right" type="button" aria-label="Girar para a direita" title="Girar para a direita">↷</button><button id="reset-view" type="button">Restaurar vista</button></div>
       <div class="track-stage">
         <canvas id="game-canvas" aria-label="Seis pistas coloridas com trajetórias diferentes. Libere cada bola pelos botões ou pelas teclas 1 a 6."></canvas>
         <div id="launchers" class="launchers" role="group" aria-label="Liberar bolas"></div>
@@ -104,7 +104,7 @@ function updateUrl(seed: number, replace = false) {
 }
 
 function release(trackId: number) {
-  if (game.release(trackId, performance.now())) syncInterface();
+  if (game.release(trackId, simulationTime(performance.now()))) syncInterface();
 }
 
 const input = new InputManager(release, game.puzzle.tracks.length);
@@ -188,7 +188,7 @@ function updateDebug() {
   const longest = Math.max(...game.puzzle.tracks.map((track) => track.travelDuration));
   const debug = element('debug');
   debug.hidden = false;
-  debug.innerHTML = `<h2>Debug · Seed #${game.puzzle.seed} · ${game.state}</h2><p>Relógio: performance.now(), em ms. Atraso ideal relativo à liberação da pista mais lenta.</p><div class="table-scroll"><table><thead><tr><th>Pista</th><th>Duração</th><th>Liberação</th><th>Chegada</th><th>Atraso ideal</th></tr></thead><tbody>${game.puzzle.tracks.map((track, index) => {
+  debug.innerHTML = `<h2>Debug · Seed #${game.puzzle.seed} · ${game.state}</h2><p>Relógio de simulação a 75% de performance.now(), em ms. Atraso ideal relativo à liberação da pista mais lenta.</p><div class="table-scroll"><table><thead><tr><th>Pista</th><th>Duração</th><th>Liberação</th><th>Chegada</th><th>Atraso ideal</th></tr></thead><tbody>${game.puzzle.tracks.map((track, index) => {
     const ball = game.balls[index];
     return `<tr><th>${track.id + 1} · ${track.name}</th><td>${track.travelDuration.toFixed(2)}</td><td>${ball.releasedAt?.toFixed(2) ?? '—'}</td><td>${ball.arrivedAt?.toFixed(2) ?? '—'}</td><td>${(longest - track.travelDuration).toFixed(2)}</td></tr>`;
   }).join('')}</tbody></table></div>`;
@@ -249,6 +249,8 @@ async function sharePuzzle() {
 
 element('retry').addEventListener('click', retry);
 element('reset-view').addEventListener('click', () => renderer.resetView());
+element('rotate-left').addEventListener('click', () => renderer.rotateView(-1));
+element('rotate-right').addEventListener('click', () => renderer.rotateView(1));
 element('new-puzzle').addEventListener('click', newPuzzle);
 element('share').addEventListener('click', sharePuzzle);
 window.addEventListener('popstate', onPopState);
@@ -259,7 +261,8 @@ updateScores();
 syncInterface();
 updateDebug();
 
-function frame(now: number) {
+function frame(realTime: number) {
+  const now = simulationTime(realTime);
   game.update(now);
   renderer.draw(game, now);
   for (const [index, button] of buttons.entries()) {

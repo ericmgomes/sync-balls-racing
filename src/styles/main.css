@@ -220,6 +220,8 @@ h1 em { color: #627b87; }
 .result-mark { background: #e0e6df; color: #476758; }
 .view-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 0 28px; color: #838b8c; font-size: 10px; }
 .view-controls button { border: 1px solid #d5d8d2; border-radius: 6px; padding: 5px 9px; background: transparent; color: #4b5d63; cursor: pointer; font: inherit; }
+.view-controls { flex-wrap: wrap; }
+#rotate-left, #rotate-right { min-width: 34px; min-height: 34px; font-size: 20px; }
 #game-canvas { touch-action: none; cursor: grab; }
 #game-canvas:active { cursor: grabbing; }
 .launch-button:hover:not(:disabled) { border-color: var(--track-color); box-shadow: 0 0 0 4px #ffffff55; }
