@@ -31,6 +31,10 @@ Vitórias mostram a diferença entre as chegadas e salvam o melhor resultado. De
 
 ## Física
 
+Uma unidade do mundo corresponde a 1 mm: o tabuleiro tem 1 m de largura e a largada fica a 18 cm de altura. A gravidade é 9.810 mm/s² (9,81 m/s²), sem câmera lenta. O raio das bolas é 12 mm. A textura metálica gira pela distância percorrida (ângulo = distância / raio), acumulando a orientação nas curvas; os reflexos da iluminação permanecem fixos na cena.
+
+Referência para rolamento sem deslizamento e inércia: [OpenStax — Rolling Motion](https://openstax.org/books/university-physics-volume-1/pages/11-1-rolling-motion). Os testes comparam uma rampa sem perdas à solução analítica de uma esfera maciça e verificam a equivalência entre metros e milímetros.
+
 As esferas metálicas rolam dentro das canaletas sob a mesma gravidade. O modelo usa a inércia de uma esfera maciça (fator 1,4), resistência ao rolamento e arrasto proporcional ao quadrado da velocidade. A força tangencial depende da inclinação real em 3D. A resistência sempre se opõe ao movimento.
 
 A simulação avança em segmentos de até uma unidade lógica, resolve a aceleração em cada trecho e registra distância, velocidade e tempo. Se a energia se esgota numa subida, calcula o ponto de parada e deixa a bola retornar. Não aplica velocidade mínima nem impulso para vencer elevações. A renderização consulta essa trajetória pelo relógio `performance.now()`, sem depender do FPS.
@@ -54,7 +58,7 @@ A faixa e o prazo de chegada usam timestamps independentes dos frames. O resulta
 - `src/styles/main.css`: layout responsivo.
 - `tests/`: física, geração, sincronização, bloqueio e persistência.
 
-A arquitetura prevê Easy (4 bolas), Normal (6) e Hard (8); a interface usa Normal. O armazenamento é separado por seed e dificuldade, com fallback em memória se localStorage estiver bloqueado. Cada abertura ou reinício conta uma tentativa. A versão v4 dos recordes separa estas regras dos resultados antigos, que permanecem intactos no armazenamento.
+A arquitetura prevê Easy (4 bolas), Normal (6) e Hard (8); a interface usa Normal. O armazenamento é separado por seed e dificuldade, com fallback em memória se localStorage estiver bloqueado. Cada abertura ou reinício conta uma tentativa. A versão v5 dos recordes separa a escala física atual dos resultados antigos, que permanecem intactos no armazenamento.
 
 ## Limites do MVP
 

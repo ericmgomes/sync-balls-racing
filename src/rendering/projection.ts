@@ -1,6 +1,6 @@
-import { WORLD } from '../game/config';
+import { PHYSICS, WORLD } from '../game/config';
 import type { Point } from '../game/types';
-export const BALL_LIFT = 12;
+export const BALL_LIFT = PHYSICS.ballRadius;
 export function projectPoint(point: Point, lift = 0): Point {
     const u = point.x / WORLD.width;
     const v = point.y / WORLD.height;

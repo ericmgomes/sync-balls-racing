@@ -12,7 +12,7 @@ function memoryStorage() {
   return { data, storage };
 }
 
-const scoreKey = (seed: number, difficulty = 'normal') => `sincrono:scores:v4:${difficulty}:${seed}`;
+const scoreKey = (seed: number, difficulty = 'normal') => `sincrono:scores:v5:${difficulty}:${seed}`;
 
 test('tentativas e recorde persistem sem resultados piores apagarem o melhor', () => {
   const { data, storage } = memoryStorage();

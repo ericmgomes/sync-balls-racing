@@ -30,7 +30,7 @@ function context(injected?: ScoreStorage | null): { storage: ScoreStorage | null
 }
 
 function keyFor(seed: number, difficulty: Difficulty): string {
-  return `sincrono:scores:v4:${difficulty}:${seed}`;
+  return `sincrono:scores:v5:${difficulty}:${seed}`;
 }
 
 function decode(raw: string | null): ScoreRecord {

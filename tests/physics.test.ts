@@ -67,7 +67,7 @@ test('mesma geometria e regras reproduzem exatamente a trajetória', () => {
 });
 
 test('perdas impedem até uma subida mais baixa que a largada', () => {
-  const ramp=track([{x:0,y:0,z:100},{x:0,y:100,z:0},{x:0,y:500,z:0},{x:0,y:650,z:90}]);
+  const ramp=track([{x:0,y:0,z:100},{x:0,y:100,z:0},{x:0,y:1100,z:0},{x:0,y:1250,z:90}]);
   assert.equal(ramp.travelDuration,Infinity);
   assert.ok(ramp.motion!.some(sample=>sample.speed < -1));
   const highestDistance=Math.max(...ramp.motion!.map(sample=>sample.distance));
@@ -78,4 +78,44 @@ test('uma bola em repouso num trecho plano não recebe impulso artificial', () =
   const ramp=track([{x:0,y:0,z:0},{x:0,y:100,z:0}]);
   assert.equal(ramp.travelDuration,Infinity);
   assert.equal(progressAtTime(ramp,10000),0);
+});
+
+test('rampa sem perdas coincide com a solução analítica de uma esfera maciça', () => {
+  const path = [{x:0,y:0,z:100}, {x:0,y:200,z:0}];
+  const length = Math.hypot(100,200);
+  const profile = motionProfile(path, [0,length], {rollingResistance:0, drag:0});
+  const acceleration = 5/7 * 9810 * 100/length;
+  assert.ok(Math.abs(profile.travelDuration/1000 - Math.sqrt(2*length/acceleration)) < 1e-9);
+  assert.ok(Math.abs(profile.speeds.at(-1)! - Math.sqrt(2*9810*100*5/7)) < 1e-8);
+});
+
+test('alterar a unidade espacial junto com a gravidade preserva o tempo físico', () => {
+  const path = [{x:0,y:0,z:100},{x:0,y:200,z:0}];
+  const length = Math.hypot(100,200);
+  const millimetres = motionProfile(path,[0,length],{rollingResistance:0,drag:0});
+  const metres = motionProfile(path.map(p=>({x:p.x/1000,y:p.y/1000,z:p.z/1000})),[0,length/1000],
+    {gravity:9.81,rollingResistance:0,drag:0,maxSpatialStep:.001});
+  assert.ok(Math.abs(millimetres.travelDuration-metres.travelDuration)<1e-8);
+});
+
+test('puzzle relatado mantém energia decrescente e desacelera nas subidas', () => {
+  for (const ramp of generatePuzzle(2792489626).tracks) {
+    let previousEnergy = Infinity;
+    let uphillSamples = 0;
+    for (let i = 1; i < ramp.motion!.length; i++) {
+      const sample = ramp.motion![i];
+      const previous = ramp.motion![i-1];
+      const z = pointAtProgress(ramp,sample.distance/ramp.length).z!;
+      const previousZ = pointAtProgress(ramp,previous.distance/ramp.length).z!;
+      const energy = PHYSICS.gravity*z + PHYSICS.rollingInertia*sample.speed**2/2;
+      assert.ok(energy <= previousEnergy + .001);
+      previousEnergy = energy;
+      if (z > previousZ + .001) {
+        assert.ok(sample.speed < previous.speed);
+        uphillSamples++;
+      }
+    }
+    assert.ok(uphillSamples>10);
+    assert.ok(ramp.travelDuration<3000,'tabuleiro de um metro não deve parecer em câmera lenta');
+  }
 });

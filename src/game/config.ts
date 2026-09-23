@@ -5,11 +5,13 @@ export const WORLD = { width: 1000, height: 590, startY: 66, finishY: 514, margi
 export const BARRIER = { topY: 468, bottomY: WORLD.finishY, clearance: 20 } as const;
 
 export const PHYSICS = {
-  gravity: 100,
+  // World distances are millimetres; velocities use mm/s, time uses seconds.
+  gravity: 9810,
+  ballRadius: 12,
   finishToleranceMs: 30,
   rollingInertia: 1.4,
-  rollingResistance: 0.045,
-  drag: 0.0008,
+  rollingResistance: 0.012,
+  drag: 0.0000023,
   maxSpatialStep: 1,
   maxSimulationMs: 30000,
 } as const;

@@ -1,7 +1,10 @@
 import { PHYSICS } from './config';
 import type { MotionSample, Point, Track } from './types';
 
-export function motionProfile(path: Point[], lengths: number[]) {
+type PhysicsSettings = { [Key in keyof typeof PHYSICS]: number };
+
+export function motionProfile(path: Point[], lengths: number[], settings: Partial<PhysicsSettings> = {}) {
+  const physics = { ...PHYSICS, ...settings };
   const total = lengths[lengths.length - 1];
   const height = (index: number) => path[index].z ?? -path[index].y;
   const motion: MotionSample[] = [{ time: 0, distance: 0, speed: 0, acceleration: 0 }];
@@ -11,7 +14,7 @@ export function motionProfile(path: Point[], lengths: number[]) {
   let direction = 1;
   let reached = false;
 
-  for (let iteration = 0; iteration < 40000 && time < PHYSICS.maxSimulationMs; iteration++) {
+  for (let iteration = 0; iteration < 40000 && time < physics.maxSimulationMs; iteration++) {
     if (distance >= total - 1e-8) { reached = true; break; }
     let low = 1;
     let high = lengths.length - 1;
@@ -23,17 +26,17 @@ export function motionProfile(path: Point[], lengths: number[]) {
     }
     const segment = low;
     const slope = (height(segment) - height(segment - 1)) / (lengths[segment] - lengths[segment - 1]);
-    const gravity = -PHYSICS.gravity * slope;
-    const resistance = PHYSICS.rollingResistance * PHYSICS.gravity * Math.sqrt(Math.max(0, 1 - slope * slope));
+    const gravity = -physics.gravity * slope;
+    const resistance = physics.rollingResistance * physics.gravity * Math.sqrt(Math.max(0, 1 - slope * slope));
     if (Math.abs(speed) < 1e-7) {
       if (Math.abs(gravity) <= resistance) break;
       direction = Math.sign(gravity);
       if (distance <= 0 && direction < 0) break;
     } else direction = Math.sign(speed);
 
-    const acceleration = (gravity - direction * (resistance + PHYSICS.drag * speed * speed)) / PHYSICS.rollingInertia;
+    const acceleration = (gravity - direction * (resistance + physics.drag * speed * speed)) / physics.rollingInertia;
     const boundary = direction > 0 ? lengths[segment] : lengths[segment - 1];
-    const step = direction * Math.min(PHYSICS.maxSpatialStep, Math.abs(boundary - distance));
+    const step = direction * Math.min(physics.maxSpatialStep, Math.abs(boundary - distance));
     if (Math.abs(step) < 1e-9) {
       // At a vertex, select the segment in the new direction without adding energy.
       distance = Math.max(0, Math.min(total, distance + direction * 1e-8));

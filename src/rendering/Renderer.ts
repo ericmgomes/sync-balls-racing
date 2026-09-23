@@ -3,6 +3,14 @@ import type { Game } from '../game/Game';
 import { pointAtProgress } from '../game/Track';
 import type { Point, Puzzle, Track } from '../game/types';
 import { BALL_LIFT, projectPoint } from './projection';
+import { rollingOrientation, rotateSurface, type Vector } from './rolling';
+// Fine brushed-metal marks move with the sphere; lighting stays fixed in the scene.
+const surfaceMarks: Vector[] = Array.from({ length: 42 }, (_, i) => {
+    const z = 1 - 2 * (i + .5) / 42;
+    const angle = i * Math.PI * (3 - Math.sqrt(5));
+    const ring = Math.sqrt(1 - z*z);
+    return [Math.cos(angle)*ring, Math.sin(angle)*ring, z];
+});
 function shade(hex: string, factor: number): string {
     const n = parseInt(hex.slice(1), 16);
     return `rgb(${[n >> 16, (n >> 8) & 255, n & 255].map(c => Math.round(Math.min(255, c * factor))).join(',')})`;
@@ -262,6 +270,17 @@ export class Renderer {
             c.strokeStyle = '#dbeaf466';
             c.lineWidth = 1;
             c.stroke();
+            const orientation = rollingOrientation(track, ball.progress);
+            for (const mark of surfaceMarks) {
+                const [x, y, z] = rotateSurface(orientation, mark);
+                const facing = .62*y + .785*z;
+                if (facing <= .08) continue;
+                const screenY = .785*y - .62*z;
+                c.beginPath();
+                c.ellipse(p.x+x*r*.95, p.y+screenY*r*.95, Math.max(.35,r*.045), Math.max(.2,r*.022), -.4, 0, Math.PI*2);
+                c.fillStyle = `rgba(38,54,65,${.38*facing})`;
+                c.fill();
+            }
             c.beginPath();
             c.arc(p.x, p.y, r * .8, .2, 2.8);
             c.strokeStyle = '#c9d6de';
